@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 use syzygy_core::domain::{CreateUser, DomainError, UpdateUser, User, UserProfile};
 use syzygy_core::ports::UserRepository;
@@ -12,6 +12,17 @@ impl PgUserRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    fn row_to_user(row: &sqlx::postgres::PgRow) -> User {
+        User {
+            id: row.get("id"),
+            username: row.get("username"),
+            display_name: row.get("display_name"),
+            bio: row.get("bio"),
+            avatar_url: row.get("avatar_url"),
+            created_at: row.get("created_at"),
+        }
+    }
 }
 
 #[async_trait]
@@ -20,18 +31,17 @@ impl UserRepository for PgUserRepository {
         let id = Uuid::new_v4();
         let now = chrono::Utc::now();
 
-        let existing = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM users WHERE username = $1",
-        )
-        .bind(&input.username)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("DB error checking username: {e}");
-            DomainError::UsernameAlreadyExists
-        })?;
+        let existing = sqlx::query("SELECT COUNT(*) as cnt FROM users WHERE username = $1")
+            .bind(&input.username)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("DB error checking username: {e}");
+                DomainError::UsernameAlreadyExists
+            })?;
 
-        if existing > 0 {
+        let count: i64 = existing.get("cnt");
+        if count > 0 {
             return Err(DomainError::UsernameAlreadyExists);
         }
 
@@ -41,7 +51,7 @@ impl UserRepository for PgUserRepository {
             &input.display_name
         };
 
-        sqlx::query_as::<_, User>(
+        let row = sqlx::query(
             r#"INSERT INTO users (id, username, display_name, bio, password_hash, created_at)
                VALUES ($1, $2, $3, $4, $5, $6)
                RETURNING id, username, display_name, bio, avatar_url, created_at"#,
@@ -57,11 +67,13 @@ impl UserRepository for PgUserRepository {
         .map_err(|e| {
             tracing::error!("DB error creating user: {e}");
             DomainError::UsernameAlreadyExists
-        })
+        })?;
+
+        Ok(Self::row_to_user(&row))
     }
 
     async fn find_by_id(&self, id: Uuid) -> Result<User, DomainError> {
-        sqlx::query_as::<_, User>(
+        let row = sqlx::query(
             "SELECT id, username, display_name, bio, avatar_url, created_at FROM users WHERE id = $1",
         )
         .bind(id)
@@ -71,11 +83,13 @@ impl UserRepository for PgUserRepository {
             tracing::error!("DB error finding user: {e}");
             DomainError::UserNotFound
         })?
-        .ok_or(DomainError::UserNotFound)
+        .ok_or(DomainError::UserNotFound)?;
+
+        Ok(Self::row_to_user(&row))
     }
 
     async fn find_by_username(&self, username: &str) -> Result<User, DomainError> {
-        sqlx::query_as::<_, User>(
+        let row = sqlx::query(
             "SELECT id, username, display_name, bio, avatar_url, created_at FROM users WHERE username = $1",
         )
         .bind(username)
@@ -85,11 +99,13 @@ impl UserRepository for PgUserRepository {
             tracing::error!("DB error finding user by username: {e}");
             DomainError::UserNotFound
         })?
-        .ok_or(DomainError::UserNotFound)
+        .ok_or(DomainError::UserNotFound)?;
+
+        Ok(Self::row_to_user(&row))
     }
 
     async fn find_by_username_with_password(&self, username: &str) -> Result<(User, String), DomainError> {
-        let row = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, String, chrono::DateTime<chrono::Utc>)>(
+        let row = sqlx::query(
             "SELECT id, username, display_name, bio, avatar_url, password_hash, created_at FROM users WHERE username = $1",
         )
         .bind(username)
@@ -102,14 +118,15 @@ impl UserRepository for PgUserRepository {
         .ok_or(DomainError::UserNotFound)?;
 
         let user = User {
-            id: row.0,
-            username: row.1,
-            display_name: row.2,
-            bio: row.3,
-            avatar_url: row.4,
-            created_at: row.6,
+            id: row.get("id"),
+            username: row.get("username"),
+            display_name: row.get("display_name"),
+            bio: row.get("bio"),
+            avatar_url: row.get("avatar_url"),
+            created_at: row.get("created_at"),
         };
-        Ok((user, row.5))
+        let password_hash: String = row.get("password_hash");
+        Ok((user, password_hash))
     }
 
     async fn update(&self, id: Uuid, input: &UpdateUser) -> Result<User, DomainError> {
@@ -119,7 +136,7 @@ impl UserRepository for PgUserRepository {
         let bio = input.bio.clone().unwrap_or(user.bio);
         let avatar_url = input.avatar_url.clone().or(user.avatar_url);
 
-        sqlx::query_as::<_, User>(
+        let row = sqlx::query(
             r#"UPDATE users
                SET display_name = $1, bio = $2, avatar_url = $3
                WHERE id = $4
@@ -134,13 +151,15 @@ impl UserRepository for PgUserRepository {
         .map_err(|e| {
             tracing::error!("DB error updating user: {e}");
             DomainError::UserNotFound
-        })
+        })?;
+
+        Ok(Self::row_to_user(&row))
     }
 
     async fn get_profile(&self, id: Uuid) -> Result<UserProfile, DomainError> {
         let user = self.find_by_id(id).await?;
 
-        let counts = sqlx::query_as::<_, (i64, i64, i64)>(
+        let row = sqlx::query(
             r#"SELECT
                 (SELECT COUNT(*) FROM follows WHERE followee_id = $1) as follower_count,
                 (SELECT COUNT(*) FROM follows WHERE follower_id = $1) as following_count,
@@ -156,15 +175,15 @@ impl UserRepository for PgUserRepository {
 
         Ok(UserProfile {
             user,
-            follower_count: counts.0,
-            following_count: counts.1,
-            post_count: counts.2,
+            follower_count: row.get("follower_count"),
+            following_count: row.get("following_count"),
+            post_count: row.get("post_count"),
         })
     }
 
-    async fn search(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<User>, DomainError> {
-        let pattern = format!("%{}%", query);
-        sqlx::query_as::<_, User>(
+    async fn search(&self, query_str: &str, limit: i64, offset: i64) -> Result<Vec<User>, DomainError> {
+        let pattern = format!("%{}%", query_str);
+        let rows = sqlx::query(
             r#"SELECT u.id, u.username, u.display_name, u.bio, u.avatar_url, u.created_at
                FROM users u
                WHERE u.username ILIKE $1 OR u.display_name ILIKE $1
@@ -179,6 +198,8 @@ impl UserRepository for PgUserRepository {
         .map_err(|e| {
             tracing::error!("DB error searching users: {e}");
             DomainError::UserNotFound
-        })
+        })?;
+
+        Ok(rows.iter().map(Self::row_to_user).collect())
     }
 }

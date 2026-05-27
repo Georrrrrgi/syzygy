@@ -4,6 +4,7 @@ use axum::{
 };
 use axum::response::IntoResponse;
 use serde::Deserialize;
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::errors::ApiError;
@@ -105,7 +106,7 @@ pub async fn get_followers(
     let limit = pagination.limit.unwrap_or(20).min(100);
     let offset = pagination.offset.unwrap_or(0);
 
-    let users = sqlx::query_as::<_, syzygy_core::domain::User>(
+    let rows = sqlx::query(
         r#"SELECT u.id, u.username, u.display_name, u.bio, u.avatar_url, u.created_at
            FROM users u
            INNER JOIN follows f ON f.follower_id = u.id
@@ -120,6 +121,15 @@ pub async fn get_followers(
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    let users: Vec<syzygy_core::domain::User> = rows.iter().map(|r| syzygy_core::domain::User {
+        id: r.get("id"),
+        username: r.get("username"),
+        display_name: r.get("display_name"),
+        bio: r.get("bio"),
+        avatar_url: r.get("avatar_url"),
+        created_at: r.get("created_at"),
+    }).collect();
+
     Ok(Json(users))
 }
 
@@ -131,7 +141,7 @@ pub async fn get_following(
     let limit = pagination.limit.unwrap_or(20).min(100);
     let offset = pagination.offset.unwrap_or(0);
 
-    let users = sqlx::query_as::<_, syzygy_core::domain::User>(
+    let rows = sqlx::query(
         r#"SELECT u.id, u.username, u.display_name, u.bio, u.avatar_url, u.created_at
            FROM users u
            INNER JOIN follows f ON f.followee_id = u.id
@@ -145,6 +155,15 @@ pub async fn get_following(
     .fetch_all(&state.db)
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let users: Vec<syzygy_core::domain::User> = rows.iter().map(|r| syzygy_core::domain::User {
+        id: r.get("id"),
+        username: r.get("username"),
+        display_name: r.get("display_name"),
+        bio: r.get("bio"),
+        avatar_url: r.get("avatar_url"),
+        created_at: r.get("created_at"),
+    }).collect();
 
     Ok(Json(users))
 }
