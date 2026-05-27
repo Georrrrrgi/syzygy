@@ -1,0 +1,12 @@
+[package]
+name = "syzygy-core"
+version = "0.1.0"
+edition = "2021"
+description = "The pristine domain layer of SYZYGY — uncontaminated by framework concerns."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "1"
+async-trait = "0.1"
