@@ -2,7 +2,6 @@ use axum::{extract::State, Json};
 use axum::response::IntoResponse;
 use serde::Deserialize;
 use tower_cookies::{Cookie, Cookies};
-use uuid::Uuid;
 
 use crate::errors::ApiError;
 use crate::middleware::AuthUser;

@@ -3,9 +3,9 @@ use axum::{
     http::request::Parts,
     middleware::Next,
     response::Response,
-    RequestPartsExt,
+    RequestExt,
 };
-use tower_cookies::{Cookie, Cookies};
+use tower_cookies::Cookies;
 use uuid::Uuid;
 
 use crate::state::AppState;

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
+use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub enum WsEvent {
     NewPost { post_id: Uuid, author_id: Uuid },
     NewLike { post_id: Uuid, user_id: Uuid },
@@ -42,9 +42,9 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn notify_followers(&self, event: WsEvent, follower_id: Uuid) {
+    pub async fn notify_followers(&self, event: WsEvent, _follower_id: Uuid) {
         let channels = self.channels.read().await;
-        for (user_id, tx) in channels.iter() {
+        for (_user_id, tx) in channels.iter() {
             let _ = tx.send(event.clone());
         }
     }

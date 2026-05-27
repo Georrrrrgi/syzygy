@@ -11,6 +11,7 @@ pub struct Claims {
     pub iat: usize,
 }
 
+#[derive(Clone)]
 pub struct JwtService {
     secret: String,
 }
